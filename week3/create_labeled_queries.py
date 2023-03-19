@@ -4,6 +4,8 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import numpy as np
 import csv
+import re
+from nltk.stem import *
 
 # Useful if you want to perform stemming.
 import nltk
@@ -49,11 +51,37 @@ queries_df = pd.read_csv(queries_file_name)[['category', 'query']]
 queries_df = queries_df[queries_df['category'].isin(categories)]
 
 # IMPLEMENT ME: Convert queries to lowercase, and optionally implement other normalization, like stemming.
+def normalize(query):
+    query = query.lower()
+    alpha_numeric_query = re.sub("[^A-Za-z0-9]"," ",query)
+    space_normalized_query = re.sub(r'\s+', ' ', alpha_numeric_query)
+    stemmer = PorterStemmer()
+    query_tokens = space_normalized_query.split(" ")
+    stemmed_tokens = [stemmer.stem(token) for token in query_tokens]
+    stemmed_query = " ".join(stemmed_tokens)
+    return stemmed_query
+
+queries_df['query'] = queries_df['query'].apply(normalize)
 
 # IMPLEMENT ME: Roll up categories to ancestors to satisfy the minimum number of queries per category.
 
+print("before pruning total categories {} ", queries_df['category'].nunique())
+
+while True:
+    category_query_count =  queries_df.groupby(['category']).size().reset_index(name="total_queries")
+    category_below_threshold = category_query_count[category_query_count["total_queries"] < min_queries]["category"].unique()
+    if category_below_threshold.any():
+        cat_parent_query_df = queries_df.merge(parents_df, on="category", how="left")
+        cat_parent_query_df["parent"].loc[pd.isnull] = root_category_id
+        category_to_parent_df = cat_parent_query_df.merge(category_query_count, on="category",  how="left")
+        category_to_parent_df.loc[category_to_parent_df["total_queries"] < min_queries, "category"] = category_to_parent_df["parent"]
+        queries_df = category_to_parent_df.drop(["parent", "total_queries"], axis=1)
+    else:
+        break
+
 # Create labels in fastText format.
 queries_df['label'] = '__label__' + queries_df['category']
+print("After pruning total categories {} ",queries_df['category'].nunique())
 
 # Output labeled query data as a space-separated file, making sure that every category is in the taxonomy.
 queries_df = queries_df[queries_df['category'].isin(categories)]
